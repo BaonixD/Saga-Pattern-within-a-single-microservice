@@ -1,43 +1,95 @@
-# Saga Pattern — Checkout Workflow
+# Saga Pattern — E-Commerce Checkout
 
-This project implements the Saga Pattern inside a single FastAPI microservice. 
-The idea is simple — if something breaks during checkout, everything that 
-already happened gets rolled back automatically.
+Implementation of the Saga Pattern within a single microservice using FastAPI.
 
-## Why Saga?
+## What is Saga Pattern?
 
-Normal transactions work fine in one database. But when you have multiple 
-steps that can fail independently, you need a way to undo what already 
-happened. That's what Saga does.
+Saga is a pattern for managing transactions across multiple steps. If any step fails, all previously completed steps are automatically rolled back using compensating transactions.
 
-## Checkout flow
-
-There are 3 steps — Payment, Inventory, Shipping. Each step knows how to 
-do its job and how to undo it if something goes wrong later.
-
-If Inventory fails after Payment already went through — the money gets 
-refunded automatically. If Shipping fails — inventory reservation gets 
-released and money gets refunded. All in reverse order.
-
-## Project structure
+## How it works
 ```
-├── main.py        # entry point, single /checkout endpoint
-├── saga.py        # orchestrator, runs steps and handles rollback
-├── models.py      # checkout request model
+POST /checkout
+      │
+      ▼
+1. Payment.do()        → charge the card
+      │
+      ▼
+2. Inventory.do()      → reserve the product
+      │
+      ▼
+3. Shipping.do()       → assign a courier
+      │
+      ▼
+   SUCCESS ✅
+
+If any step fails → compensate in reverse order:
+   Shipping fails  → Inventory.compensate() → Payment.compensate()
+   Inventory fails → Payment.compensate()
+```
+
+## Project Structure
+```
+Saga Pattern/
+├── main.py          # FastAPI app and endpoints
+├── saga.py          # Saga orchestrator (manages steps and rollback)
+├── models.py        # Request/Response models
+├── requirements.txt
 └── steps/
-    ├── payment.py    # charge / refund
-    ├── inventory.py  # reserve / release
-    └── shipping.py   # assign courier / cancel
+    ├── payment.py   # Charge card / Refund
+    ├── inventory.py # Reserve product / Release
+    └── shipping.py  # Assign courier / Cancel
 ```
 
-## Running locally
+## Steps
+
+Each step has two methods:
+- `do()` — executes the action
+- `compensate()` — rolls back the action if a later step fails
+
+| Step | do() | compensate() |
+|------|------|--------------|
+| Payment | Charge the card | Refund the money |
+| Inventory | Reserve the product | Release the reservation |
+| Shipping | Assign a courier | Cancel the delivery |
+
+## How to run
 ```bash
+# Clone the repo
+git clone https://github.com/BaonixD/Saga-Pattern-within-a-single-microservice.git
+cd Saga-Pattern-within-a-single-microservice
+
+# Create virtual environment
 python3 -m venv venv
 source venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Run the server
 uvicorn main:app --reload
 ```
 
-Then open http://127.0.0.1:8000/docs and try the /checkout endpoint. 
-Each step has a 20% chance to fail so just hit Execute a few times 
-and you'll see both success and compensation in action.
+Open **http://127.0.0.1:8000/docs** to test via Swagger UI.
+
+## Example
+
+**SUCCESS response:**
+```json
+{
+  "status": "SUCCESS",
+  "order_id": "order_001",
+  "payment": { "status": "charged", "amount": 49.99 },
+  "inventory": { "status": "reserved", "quantity": 1 },
+  "shipping": { "status": "shipped" }
+}
+```
+
+**FAILED response (with compensation):**
+```json
+{
+  "status": "FAILED",
+  "order_id": "order_002",
+  "error": "Товар macbook_pro закончился на складе",
+  "compensated_steps": ["payment"]
+}
+```
